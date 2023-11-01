@@ -1,9 +1,12 @@
 /// <reference types="node" />
 /// <reference types="node" />
+/// <reference types="node" />
+/// <reference types="node" />
 import EventEmitter from "events";
 import { Server as httpsServer } from 'https';
 import { Server, Socket } from "socket.io";
 import { Socket as clientSocket, ManagerOptions, SocketOptions } from "socket.io-client";
+import { Socket as NetSocket } from "net";
 export declare class SocketIOGatewayServer extends EventEmitter {
     LOGLEVEL: typeof logLevel;
     server: httpsServer;
@@ -24,14 +27,11 @@ export declare class Agent_Connection {
     getLogPrefix(): string;
     close(error: any): void;
     error(error: any): void;
-    send(message: any): void;
 }
 export declare class Client_Connection {
     server: SocketIOGatewayServer;
     room: string;
     client: Socket;
-    query: any;
-    guacOptions: guacLiteOptions;
     constructor(server: SocketIOGatewayServer, ws: Socket, callback?: preProcess);
     init(callback?: preProcess): Promise<void>;
     get_agent_socket(room: string): Socket | undefined;
@@ -39,7 +39,6 @@ export declare class Client_Connection {
     getLogPrefix(): string;
     close(error: any): void;
     error(error: any): void;
-    send(message: any): void;
 }
 export declare class GuacamoleClient {
     LOGLEVEL: typeof logLevel;
@@ -53,12 +52,12 @@ export declare class GuacamoleClient {
     lastActivity: number;
     logOptions: log_settings;
     clientOptions: guacLiteOptions;
-    socket: clientSocket;
-    activityCheckInterval: any;
+    guacdConnection: NetSocket;
+    activityCheckInterval: NodeJS.Timeout;
     constructor(agent: RemoteAgent, logOptions: log_settings, clientOptions: guacLiteOptions);
+    checkActivity(): void;
     close(error: any): void;
     send(data: any): void;
-    log(level: any, ...args: any[]): void;
     processConnectionOpen(): void;
     sendHandshakeReply(): void;
     getConnectionOption(optionName: any): any;
@@ -70,15 +69,17 @@ export declare class GuacamoleClient {
     processReceivedData(data: any): void;
     sendBufferToWebSocket(): void;
 }
-export declare class RemoteAgent {
+export declare class RemoteAgent extends EventEmitter {
     agent_options: agent_options;
     socket: clientSocket;
     LOGLEVEL: typeof logLevel;
     logOptions: log_settings;
     guacdOptions: guacdOptions;
-    guacd: any;
-    constructor(agent_opts: agent_options, guacdOptions: guacdOptions, log_opts?: log_settings);
+    guacLiteOptions: guacLiteOptions;
+    guacd: GuacamoleClient;
+    constructor(agent_opts: agent_options, guacdOptions: guacdOptions, guacLiteOptions: guacLiteOptions, log_opts?: log_settings);
     connect(): void;
+    log(level: any, ...args: any[]): void;
     send(event: string, data: any): void;
     handle_socket_err(err: any): void;
 }
@@ -110,7 +111,7 @@ export interface preProcess {
         auth: any;
         /**Any other value that in NOT encrypted and included in the query of the socket will be sent to the callback for use as well*/
         [x: string]: any;
-    }, callback: (error: any, options?: guacLiteOptions) => void): Promise<void>;
+    }, callback: (error: any, room: string) => void): Promise<void>;
 }
 export type connection_type = "rdp" | "vnc" | "ssh" | "telnet" | "kubernetes";
 export declare const commonUnencryptOptions: commonUnencryptOption[];
@@ -1084,7 +1085,6 @@ export interface kubernetesGuacLiteOptions extends baseOptions {
 }
 export interface baseOptions {
     maxInactivityTime?: number;
-    room: string;
 }
 export type guacLiteOptions = vncGuacLiteOptions | rdpGuacLiteOptions | sshGuacLiteOptions | telnetGuacLiteOptions | kubernetesGuacLiteOptions;
 export interface guacdOptions {
@@ -1094,5 +1094,9 @@ export interface guacdOptions {
 export interface agent_options {
     id: string;
     host: string;
+    preConnect?: preConnect;
     socket_opts: Partial<ManagerOptions & SocketOptions>;
+}
+export interface preConnect {
+    (options: guacLiteOptions, callback: (error: any, options: guacLiteOptions) => void): Promise<void>;
 }

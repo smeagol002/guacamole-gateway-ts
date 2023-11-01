@@ -1,7 +1,7 @@
 {
-  "name": "guacamole-lite-ts",
-  "description": "TS version of guacamole server in node.js as a socket.io server. RDP/VNC client for HTML5 browsers",
-  "version": "0.1.18-beta10",
+  "name": "guacamole-gateway-ts",
+  "description": "NodeJs Typescript Socket.io gateway for guacamole",
+  "version": "0.0.1-beta4",
   "type": "module",
   "scripts": {
     "build": "npx tsc"
@@ -37,11 +37,11 @@
     "node": ">=6"
   },
   "bugs": {
-    "url": "https://github.com/smeagol002/guacamole-lite-ts/issues"
+    "url": "https://github.com/smeagol002/guacamole-gateway-ts/issues"
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/smeagol002/guacamole-lite-ts.git"
+    "url": "https://github.com/smeagol002/guacamole-gateway-ts.git"
   },
   "license": "Apache-2.0"
 }

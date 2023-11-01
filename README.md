@@ -1,22 +1,22 @@
-# guacamole-lite-ts
+# guacamole-gateway-ts
 
 ## Synopsis
-Typescript *guacamole-lite-ts* is a NodeJS replacement for *guacamole-client* (server-side Java servlet).
+Typescript *guacamole-gateway-ts* is a NodeJS replacement for *guacamole-client* (server-side Java servlet).
 Guacamole is a RDP/VNC client for HTML5 browsers. This is a fork of vadimpronin excellent work on guacamole-lite.
 
 This is solution allows dynamic control of encryption and decryption inside the callback. This also requires an express server. The work on this repo is highly experimental, and I have no prior experience on publishing packages to npm. Take this repo with a grain of salt.
 
-This diagram describes the architecture of Guacamole and the role of *guacamole-lite-ts* in it:
+This diagram describes the architecture of Guacamole and the role of *guacamole-gateway-ts* in it:
 ![Alt text](https://github.com/smeagol002/guacamole-rd-ts/blob/main/src/assets/RemoteDesktop.png?raw=true)
 
 
 ## Installation
 
 ```
-npm install --save guacamole-lite-ts
+npm install --save guacamole-gateway-ts
 ```
 
-To connect to *guacamole-lite-ts* from the browser you need to add *guacamole-common-js* into your page. Please refer to 
+To connect to *guacamole-gateway-ts* from the browser you need to add *guacamole-common-js* into your page. Please refer to 
 [Chapter 17](http://guacamole.incubator.apache.org/doc/gug/guacamole-common-js.html) of Guacamole documentation for instructions on how to 
 do that.
 
@@ -63,14 +63,14 @@ of Guacamole documentation section *Configuring connections*) This is also where
 
 ### Default connection options
 You don't necessary need to pass all connection parameters in the token. You can omit settings that are common for all 
-your connections by moving them to **clientOptions.connectionDefaultSettings** in *guacamole-lite-ts* server:
+your connections by moving them to **clientOptions.connectionDefaultSettings** in *guacamole-gateway-ts* server:
 
 
 
 ```typescript
 import { createServer } from 'https';
 import express, { Request, Response, NextFunction } from "express";
-import { GuacdServer, guacLiteOptions, guacdOptions, logLevel } from 'guacamole-lite-ts';
+import { GuacdServer, guacLiteOptions, guacdOptions, logLevel } from 'guacamole-gateway-ts';
 
     var listen_port = 4823;
     var app = express();
@@ -158,7 +158,7 @@ By default only *width*, *height* and *dpi* can be set in query. Others are igno
 The list of whitelisted parameters can be modified in **clientOptions**:
 
 ```typescript
-import { guacLiteOptions } from 'guacamole-lite-ts';
+import { guacLiteOptions } from 'guacamole-gateway-ts';
 
 const clientOpt: guacLiteOptions = {
     allowedUnencryptedConnectionSettings: {
@@ -185,7 +185,7 @@ const clientOpt: guacLiteOptions = {
 
 ### Custom log functions
 
-By default *guacamole-lite-ts* uses `console.log` and `console.error` functions for logging.
+By default *guacamole-gateway-ts* uses `console.log` and `console.error` functions for logging.
 You can redefine these functions by setting **clientOptions.log.stdLog**
 and **clientOptions.log.errorLog** like in the example below. Note that **clientOptions.log.level**
 is still applied, which means that messages that don't match desired log level won't be

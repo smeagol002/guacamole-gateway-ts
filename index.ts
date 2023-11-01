@@ -32,7 +32,8 @@ export class SocketIOGatewayServer extends EventEmitter {
 
         this.io = new Server(this.server, { 
             'transports': ['websocket'],
-            maxHttpBufferSize: 1073741824  
+            maxHttpBufferSize: 1073741824,
+            pingTimeout: 60000
         });
         
         this.io.on('connection', async (socket: Socket) => {
@@ -71,7 +72,9 @@ export class Agent_Connection {
     agent: Socket;
     query: any;
 
-    constructor(server: SocketIOGatewayServer, ws: Socket, callback?: preProcess) {        
+    constructor(server: SocketIOGatewayServer, ws: Socket, callback?: preProcess) {     
+        ws['type'] = 'agent';
+
         this.server = server;
         this.agent = ws;
         this.query = ws.handshake.query;
@@ -90,10 +93,16 @@ export class Agent_Connection {
                 
                 this.room = room;
                 this.log(this.server.LOGLEVEL.NORMAL, 'New Agent has joined room:' + this.room);
-                this.agent.join(this.room);
+                this.agent.join(String(this.room));
+
+                this.agent.on('from_agent', (data)=>{
+                    this.log(this.server.LOGLEVEL.VERBOSE, 'from_agent -> to_client', data)
+                    this.server.io.to(String(this.room)).emit('to_client', data, (error) => {
+                        if (error) { this.close(error) }
+                    })
+                })
 
                 this.agent.on('close', this.close.bind(this));
-                this.agent.on('remote', this.send.bind(this));
                 
             });
         } else {
@@ -127,7 +136,7 @@ export class Agent_Connection {
     close(error) {
         if (error) { this.log(this.server.LOGLEVEL.ERRORS, 'Closing agent connection with error: ', error); }
         
-        this.agent.leave(this.room);
+        this.agent.leave(String(this.room));
         this.agent.disconnect();
 
         this.log(this.server.LOGLEVEL.VERBOSE, 'Agent connection closed');
@@ -136,13 +145,6 @@ export class Agent_Connection {
     error(error) {
         this.server.emit('error', this, error);
         this.close(error);
-    }
-
-    send(message) {
-        this.log(this.server.LOGLEVEL.DEBUG, '>>>> ' + message + '###');
-        this.server.io.to(this.room).emit('to_client', message, (error) => {
-            if (error) { this.close(error) }
-        });
     }
 }
 
@@ -153,7 +155,8 @@ export class Client_Connection {
     client: Socket;
 
     constructor(server: SocketIOGatewayServer, ws: Socket, callback?: preProcess) {
-        
+        ws['type'] = 'client';
+
         this.server = server;
         this.client = ws;
 
@@ -165,7 +168,7 @@ export class Client_Connection {
 
         if(callback){
             //perform callbacks first in order to allow the callback to handle permissions and set settings
-           await callback({ auth: this.client.handshake.auth }, (err, room) => {
+           await callback({ auth: this.client.handshake.auth, ...this.client.handshake.query }, (err, room) => {
                 if (err) { return this.close(err); }
                 
                 this.room = room;
@@ -174,13 +177,20 @@ export class Client_Connection {
                 if(!agentSocket){ 
                     this.close(new Error('Agent is not online or accepting connections right now.'));
                 } else {
-                    this.client.join(this.room);
+                    this.client.join(String(this.room));
                     this.log(this.server.LOGLEVEL.NORMAL, 'Client has joined agent in room:' + this.room);
-                    this.client.emit('client_connected');
+                    this.server.io.to(String(this.room)).emit('client_connected');
                 };
 
+                
+                this.client.on('from_client', (data)=>{
+                    this.log(this.server.LOGLEVEL.VERBOSE, 'from_client -> to_agent relay', data);
+                    this.server.io.to(String(this.room)).emit('to_agent', data, (error) => {
+                        if (error) { this.close(error) };
+                    });
+                });
+
                 this.client.on('close', this.close.bind(this));
-                this.client.on('remote', this.send.bind(this));
             });
         } else {
             this.log(this.server.LOGLEVEL.ERRORS, 'Token validation failed');
@@ -190,7 +200,7 @@ export class Client_Connection {
     }
 
     get_agent_socket(room: string): Socket | undefined{
-        const sockets = this.server.io.sockets.adapter.rooms.get(room);
+        const sockets = this.server.io.sockets.adapter.rooms.get(String(room));
         if(sockets){
             for (let socket of sockets) {
                 const agentSocket = this.server.io.sockets.sockets.get(socket);
@@ -226,8 +236,8 @@ export class Client_Connection {
     close(error) {
         if (error) {
             this.log(this.server.LOGLEVEL.ERRORS, 'Closing connection with error: ', error);
-        }
-        this.client.leave(this.room);
+        };
+        this.client.leave(String(this.room));
         this.client.disconnect();
 
         this.log(this.server.LOGLEVEL.VERBOSE, 'Client connection closed');
@@ -238,13 +248,6 @@ export class Client_Connection {
         this.close(error);
     }
 
-    send(message) {
-
-        this.log(this.server.LOGLEVEL.DEBUG, '>>>> ' + message + '###');
-        this.server.io.to(this.room).emit('to_agent', message, (error) => {
-            if (error) { this.close(error) }
-        });
-    }
 }
 
 
@@ -280,7 +283,6 @@ export class GuacamoleClient {
         
         this.clientOptions = {
             type: 'vnc',
-            room: '',
             defaultSettings: {
                 'port': '5900',
             },
@@ -288,6 +290,7 @@ export class GuacamoleClient {
         }
         DeepExtend(this.clientOptions, clientOptions);
         this.clientOptions = clientOptions;
+        console.log(this.clientOptions)
 
         this.state = this.STATE_OPENING;
 
@@ -300,13 +303,14 @@ export class GuacamoleClient {
 
         this.guacdConnection.on('connect', this.processConnectionOpen.bind(this));
         this.guacdConnection.on('data', this.processReceivedData.bind(this));
-        this.guacdConnection.on('error', (error)=>{ this.log(logLevel.ERRORS, error) });
+        this.guacdConnection.on('error', (error)=>{ this.agent.log(logLevel.ERRORS, error) });
 
         this.activityCheckInterval = setInterval(this.checkActivity.bind(this), 1000);
     }
 
     checkActivity() {
-        if (Date.now() > (this.lastActivity + 10000)) {
+        this.agent.log(this.LOGLEVEL.DEBUG, Date.now(), " - ", (this.lastActivity + 20000), Date.now() > (this.lastActivity + 20000));
+        if (Date.now() > (this.lastActivity + 20000)) {
             this.close(new Error('guacd was inactive for too long'));
         }
     }
@@ -314,9 +318,9 @@ export class GuacamoleClient {
     close(error: any) {
         if (this.state == this.STATE_CLOSED) { return; }
 
-        if (error) { this.log(this.LOGLEVEL.ERRORS, error); }
+        if (error) { this.agent.log(this.LOGLEVEL.ERRORS, error); }
 
-        this.log(this.LOGLEVEL.VERBOSE, 'Closing guacd connection');
+        this.agent.log(this.LOGLEVEL.VERBOSE, 'Closing guacd connection');
         clearInterval(this.activityCheckInterval);
 
         this.guacdConnection.removeAllListeners('close');
@@ -329,30 +333,15 @@ export class GuacamoleClient {
     send(data) {
         if (this.state == this.STATE_CLOSED) { return; }
 
-        this.log(this.LOGLEVEL.DEBUG, '<<<W2G< ' + data + '***');
+        this.agent.log(this.LOGLEVEL.DEBUG, '>>>> TO GUACAMOLE >>> ' + data + '>>>');
         this.guacdConnection.write(data);
     }
 
     
-
-    log(level, ...args) {
-        if (level > this.agent.logOptions.level) { return; }
-
-        const stdLogFunc = this.agent.logOptions.stdLog;
-        const errorLogFunc = this.agent.logOptions.errorLog;
-
-        let logFunc = stdLogFunc;
-        if (level === this.LOGLEVEL.ERRORS) { logFunc = errorLogFunc; }
-
-        var dt = new Date().toLocaleString('en-us', {year: 'numeric', month: '2-digit', day: '2-digit', hour:'2-digit', minute: '2-digit', second: '2-digit'});
-
-        logFunc('[' + dt + ']', ...args);
-    }
-
     processConnectionOpen() {
-        this.log(this.LOGLEVEL.VERBOSE, 'guacd connection open');
+        this.agent.log(this.LOGLEVEL.VERBOSE, 'guacd connection open');
 
-        this.log(this.LOGLEVEL.VERBOSE, 'Selecting connection type: ' + this.clientOptions.type);
+        this.agent.log(this.LOGLEVEL.VERBOSE, 'Selecting connection type: ' + this.clientOptions.type);
         this.sendOpCode(['select', this.clientOptions.type]);
     }
 
@@ -369,13 +358,13 @@ export class GuacamoleClient {
                 ]);
         }
         
-        //this.sendOpCode(['audio'].concat(this.clientConnection.query.GUAC_AUDIO || []));
-        //this.sendOpCode(['video'].concat(this.clientConnection.query.GUAC_VIDEO || []));
+        this.sendOpCode(['audio'].concat([]));
+        this.sendOpCode(['video'].concat([]));
         this.sendOpCode(['image']);
 
         let serverHandshake: string | string[] = this.getFirstOpCodeFromBuffer();
 
-        this.log(this.LOGLEVEL.VERBOSE, 'Server sent handshake: ' + serverHandshake);
+        this.agent.log(this.LOGLEVEL.VERBOSE, 'Server sent handshake: ' + serverHandshake);
 
         serverHandshake = serverHandshake.split(',');
         let connectionOptions: any[] = [];
@@ -391,7 +380,7 @@ export class GuacamoleClient {
 
         if (this.state != this.STATE_OPEN) {
             this.state = this.STATE_OPEN;
-            this.agent.send('open', this.agent)
+            this.agent.emit('open', this.agent)
         }
     }
 
@@ -413,7 +402,7 @@ export class GuacamoleClient {
 
     sendOpCode(opCode) {
         opCode = this.formatOpCode(opCode);
-        this.log(this.LOGLEVEL.VERBOSE, 'Sending opCode: ' + opCode);
+        this.agent.log(this.LOGLEVEL.VERBOSE, 'Sending opCode: ' + opCode);
         this.send(opCode);
     }
 
@@ -457,13 +446,13 @@ export class GuacamoleClient {
 
         if (bufferPartToSend) {
             this.receivedBuffer = this.receivedBuffer.substring(delimiterPos + 1, this.receivedBuffer.length);
-            this.agent.send('to_client',bufferPartToSend);
+            this.agent.send('from_agent', bufferPartToSend);
         }
     }
 
 }
 
-export class RemoteAgent {
+export class RemoteAgent extends EventEmitter{
 
     agent_options: agent_options;
     socket: clientSocket;
@@ -478,6 +467,8 @@ export class RemoteAgent {
     guacd: GuacamoleClient;
 
     constructor(agent_opts: agent_options, guacdOptions: guacdOptions, guacLiteOptions: guacLiteOptions, log_opts?: log_settings){
+        super();
+
         this.agent_options = agent_opts;
         this.guacLiteOptions = guacLiteOptions;
         this.guacdOptions = Object.assign({
@@ -486,36 +477,70 @@ export class RemoteAgent {
         }, guacdOptions);
 
         if(log_opts){ this.logOptions = log_opts; }
-        this.logOptions.stdLog('Agent Configured');
+        this.log('Agent Configured');
     }
 
 
     connect(){
-        this.logOptions.stdLog('Agent Attempting Connection');
+        this.log('Agent Attempting Connection');
         this.socket = io(this.agent_options.host, this.agent_options.socket_opts);
 
         this.socket.on('connect', () => {
-            this.logOptions.stdLog('Agent connected to gateway');
-        });
-        this.socket.on('client_connected', () => {
-            this.guacd = new GuacamoleClient(this, this.logOptions, this.guacLiteOptions);
+            this.log(logLevel.NORMAL,'Agent connected to gateway');
         });
 
-        this.socket.on('disconnect',    () => {     this.logOptions.stdLog('Socket disconnected'); });
-        this.socket.on('close',         () => {     this.logOptions.stdLog('Socket closed'); });
+        this.socket.on('client_connected', async () => {
+            if(this.agent_options.preConnect){
+                this.log(logLevel.DEBUG,'client_connected will pre connect callback');
+                await this.agent_options.preConnect(this.guacLiteOptions, (err, options) => {
+                    if (err) { return console.error('PreConnect Callback failed', err) }
+
+                    this.log(logLevel.DEBUG,'client_connected pre connect complete, starting guacd connection', options);
+                    this.guacd = new GuacamoleClient(this, this.logOptions, options);
+                })
+            } else {
+                this.log(logLevel.DEBUG,'client_connected will start guacd connection');
+                this.guacd = new GuacamoleClient(this, this.logOptions, this.guacLiteOptions);
+            }
+        });
+
+        //The gateway will emit anything 'from_client' to 'to_agent'
+        this.socket.on('to_agent', (data)=> {
+            this.log(logLevel.VERBOSE, 'to_agent -> to guacamole client', data);
+            this.guacd.send(data)
+        })
+
+        this.socket.on('disconnect',    () => {     this.log(logLevel.NORMAL, 'Socket disconnected'); });
+        this.socket.on('close',         () => {     this.log(logLevel.NORMAL,'Socket closed'); });
         this.socket.on('error',         (err) => {  this.handle_socket_err(`error due to ${err.message}`); });
         this.socket.on('connect_error', (err) => {  this.handle_socket_err(`connect_error due to ${err.message}`); });
 		this.socket.on('connect_failed',(err) => {  this.handle_socket_err(`connect_failed due to ${err.message}`); });
     }
 
 
+    log(level, ...args) {
+        if (level > this.logOptions.level) { return; }
+
+        const stdLogFunc = this.logOptions.stdLog;
+        const errorLogFunc = this.logOptions.errorLog;
+
+        let logFunc = stdLogFunc;
+        if (level === this.LOGLEVEL.ERRORS) { logFunc = errorLogFunc; }
+
+        var dt = new Date().toLocaleString('en-us', {year: 'numeric', month: '2-digit', day: '2-digit', hour:'2-digit', minute: '2-digit', second: '2-digit'});
+
+        logFunc('[' + dt + ']', ...args);
+    }
+
+
     send(event: string,data: any) {
+        this.log(logLevel.VERBOSE, event + ' -> to gateway', data);
         this.socket.emit(event, data);
     }
 
 
     handle_socket_err(err){
-        this.logOptions.errorLog('Socket error', err)
+        this.log(logLevel.ERRORS, 'Socket error', err)
     }
 
 }
@@ -1590,7 +1615,6 @@ export interface kubernetesGuacLiteOptions extends baseOptions {
 
 export interface baseOptions {
     maxInactivityTime?: number;
-    room: string;
 }
 
 export type guacLiteOptions = vncGuacLiteOptions | rdpGuacLiteOptions | sshGuacLiteOptions | telnetGuacLiteOptions | kubernetesGuacLiteOptions;
@@ -1603,5 +1627,10 @@ export interface guacdOptions {
 export interface agent_options {
     id: string;
     host: string;
+    preConnect?: preConnect;
     socket_opts: Partial<ManagerOptions & SocketOptions>;
+}
+
+export interface preConnect {
+    (options: guacLiteOptions, callback: (error: any, options: guacLiteOptions) => void): Promise<void>;    
 }
