@@ -1,0 +1,47 @@
+{
+  "name": "guacamole-gateway-ts",
+  "description": "NodeJs Typescript Socket.io gateway for guacamole",
+  "version": "0.0.2",
+  "type": "module",
+  "scripts": {
+    "build": "npx tsc"
+  },
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "keywords": [
+    "guacamole",
+    "guacamole-common-ts",
+    "rdp",
+    "vnc",
+    "telnet",
+    "ssh",
+    "remote desktop",
+    "socket.io",
+    "ts"
+  ],
+  "maintainers": [
+    {
+      "name": "Sean Kupiec",
+      "email": "skkupiec2@msn.com"
+    }
+  ],
+  "dependencies": {
+    "@types/node": "^20.8.7",
+    "deep-extend": "^0.6.0",
+    "socket.io": "^4.7.2",
+    "socket.io-client": "^4.7.2",
+    "socket.io-stream": "^0.9.1",
+    "typescript": "^5.2.2"
+  },
+  "engines": {
+    "node": ">=6"
+  },
+  "bugs": {
+    "url": "https://github.com/smeagol002/guacamole-gateway-ts/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/smeagol002/guacamole-gateway-ts.git"
+  },
+  "license": "Apache-2.0"
+}
