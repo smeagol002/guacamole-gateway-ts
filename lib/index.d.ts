@@ -60,12 +60,9 @@ export declare class GuacamoleClient {
     send(data: any): void;
     processConnectionOpen(): void;
     sendHandshakeReply(): void;
-    getConnectionOption(optionName: any): any;
-    getFirstOpCodeFromBuffer(): string;
     sendOpCode(opCode: any): void;
     formatOpCode(opCodeParts: any): string;
     stringifyOpCodePart(part: any): string;
-    parseOpCodeAttribute(opCodeAttribute: any): any;
     processReceivedData(data: any): void;
     sendBufferToWebSocket(): void;
 }

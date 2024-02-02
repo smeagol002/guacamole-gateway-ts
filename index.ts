@@ -94,13 +94,22 @@ export class Agent_Connection {
                 this.room = room;
                 this.log(this.server.LOGLEVEL.NORMAL, 'New Agent has joined room:' + this.room);
                 this.agent.join(String(this.room));
+                this.server.io.to(String(this.room)).fetchSockets().then(val=>{
+                    this.log(this.server.LOGLEVEL.NORMAL, 'Sockets in room:' + val.length);
+                })
 
                 this.agent.on('from_agent', (data)=>{
                     this.log(this.server.LOGLEVEL.VERBOSE, 'from_agent -> to_client', data)
-                    this.server.io.to(String(this.room)).emit('to_client', data, (error) => {
-                        if (error) { this.close(error) }
-                    })
-                })
+                    this.server.io.to(String(this.room)).emit('to_client', data)
+                });
+                this.agent.on('guacd_connected', (data)=>{
+                    this.log(this.server.LOGLEVEL.VERBOSE, 'connected successfully', data)
+                    this.server.io.to(String(this.room)).emit('agent_connected', data)
+                });
+                this.agent.on('guacd_error_disconnect', (data)=>{
+                    this.log(this.server.LOGLEVEL.VERBOSE, 'guacd_error_disconnect', data)
+                    this.server.io.to(String(this.room)).emit('client_needs_disconnect', data)
+                });
 
                 this.agent.on('close', this.close.bind(this));
                 
@@ -185,9 +194,7 @@ export class Client_Connection {
                 
                 this.client.on('from_client', (data)=>{
                     this.log(this.server.LOGLEVEL.VERBOSE, 'from_client -> to_agent relay', data);
-                    this.server.io.to(String(this.room)).emit('to_agent', data, (error) => {
-                        if (error) { this.close(error) };
-                    });
+                    this.server.io.to(String(this.room)).emit('to_agent', data);
                 });
 
                 this.client.on('close', this.close.bind(this));
@@ -290,7 +297,6 @@ export class GuacamoleClient {
         }
         DeepExtend(this.clientOptions, clientOptions);
         this.clientOptions = clientOptions;
-        console.log(this.clientOptions)
 
         this.state = this.STATE_OPENING;
 
@@ -332,9 +338,10 @@ export class GuacamoleClient {
 
     send(data) {
         if (this.state == this.STATE_CLOSED) { return; }
-
-        this.agent.log(this.LOGLEVEL.DEBUG, '>>>> TO GUACAMOLE >>> ' + data + '>>>');
-        this.guacdConnection.write(data);
+        if(typeof data  == "string"){
+            this.agent.log(this.LOGLEVEL.DEBUG, '>>>> TO GUACAMOLE >>> ' + data + '>>>');
+            this.guacdConnection.write(data);
+        }
     }
 
     
@@ -362,19 +369,27 @@ export class GuacamoleClient {
         this.sendOpCode(['video'].concat([]));
         this.sendOpCode(['image']);
 
-        let serverHandshake: string | string[] = this.getFirstOpCodeFromBuffer();
+        this.agent.log(this.LOGLEVEL.VERBOSE, 'Server sent handshake: ' + this.receivedBuffer);
+        var connectionParams: string[] = []
 
-        this.agent.log(this.LOGLEVEL.VERBOSE, 'Server sent handshake: ' + serverHandshake);
+        for(let arg of this.receivedBuffer.split(",")){
+            var val: string = arg.split(".")[1];
+            val = val.replace(";","");
 
-        serverHandshake = serverHandshake.split(',');
-        let connectionOptions: any[] = [];
-
-        for(let handshake of serverHandshake){
-            connectionOptions.push(this.getConnectionOption(handshake))
+            if(this.clientOptions.settings && this.clientOptions.settings[val]){
+                connectionParams.push(this.clientOptions.settings[val].length + "." + this.clientOptions.settings[val]);
+            }  else if(val.includes("args")){
+				connectionParams.push("7.connect");
+			} else if(val.includes("VERSION")){
+				connectionParams.push(val.length + "." + val);
+			} else {
+                connectionParams.push("0.");
+            }
         }
+        var connectionString = connectionParams.toString() + ";"
         
+        this.send(connectionString);
 
-        this.sendOpCode(connectionOptions);
 
         this.handshakeReplySent = true;
 
@@ -384,21 +399,6 @@ export class GuacamoleClient {
         }
     }
 
-    getConnectionOption(optionName) {
-        if(this.clientOptions.settings && this.clientOptions.settings[this.parseOpCodeAttribute(optionName)]){
-            return this.clientOptions.settings[this.parseOpCodeAttribute(optionName)] 
-        }
-        return null
-    }
-
-    getFirstOpCodeFromBuffer() {
-        let delimiterPos = this.receivedBuffer.indexOf(';');
-        let opCode = this.receivedBuffer.substring(0, delimiterPos);
-
-        this.receivedBuffer = this.receivedBuffer.substring(delimiterPos + 1, this.receivedBuffer.length);
-
-        return opCode;
-    }
 
     sendOpCode(opCode) {
         opCode = this.formatOpCode(opCode);
@@ -421,9 +421,6 @@ export class GuacamoleClient {
         return String(part);
     }
 
-    parseOpCodeAttribute(opCodeAttribute) {
-        return opCodeAttribute.substring(opCodeAttribute.indexOf('.') + 1, opCodeAttribute.length);
-    }
 
     processReceivedData(data) {
         this.receivedBuffer += data;
@@ -439,8 +436,8 @@ export class GuacamoleClient {
 
         this.sendBufferToWebSocket();
     }
-
-    sendBufferToWebSocket() {
+	
+	sendBufferToWebSocket() {
         const delimiterPos = this.receivedBuffer.lastIndexOf(';');
         const bufferPartToSend = this.receivedBuffer.substring(0, delimiterPos + 1);
 
@@ -506,8 +503,13 @@ export class RemoteAgent extends EventEmitter{
 
         //The gateway will emit anything 'from_client' to 'to_agent'
         this.socket.on('to_agent', (data)=> {
-            this.log(logLevel.VERBOSE, 'to_agent -> to guacamole client', data);
-            this.guacd.send(data)
+            if(this.guacd){
+                this.log(logLevel.VERBOSE, 'to_agent -> to guacamole client', data);
+                this.guacd.send(data)
+            } else {
+                //conenction to guacd has failed. close socket client's connection
+                this.send('guacd_error_disconnect', true)
+            }
         })
 
         this.socket.on('disconnect',    () => {     this.log(logLevel.NORMAL, 'Socket disconnected'); });
@@ -533,8 +535,8 @@ export class RemoteAgent extends EventEmitter{
     }
 
 
-    send(event: string,data: any) {
-        this.log(logLevel.VERBOSE, event + ' -> to gateway', data);
+    send(event: string, data: any) {
+        this.log(logLevel.VERBOSE, event + ' -> to gateway', data?.length);
         this.socket.emit(event, data);
     }
 
